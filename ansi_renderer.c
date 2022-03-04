@@ -347,14 +347,29 @@ int replaceInBuffer_and_free(int row, char *s)
     }
 }
 
-//                 y        x
+/**
+ * @brief puts single char in buffer at row, col
+ *
+ * @param row y
+ * @param col x
+ * @param c char
+ * @param r red
+ * @param g green
+ * @param b blue
+ * @param bg_r background red
+ * @param bg_g background green
+ * @param bg_b background blue
+ * @return int 0, if successful |
+ * int 1, if failed
+ */
 int bufferSet(int row, int col, char c, u_short r, u_short g, u_short b, u_short bg_r, u_short bg_g, u_short bg_b)
 {
     if (row <= (lines - 1) && col <= (maxLine / (ANSI_FORMAT + 1)))
     {
         char *buf = (char *)calloc(ANSI_FORMAT + 1, (sizeof(char)));
         snprintf(buf, ANSI_FORMAT + 1, "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm%c", r, g, b, bg_r, bg_g, bg_b, c);
-        strcpy(buffer_3d[row][col], buf); // TODO forbidden call
+        strcpy(buffer_3d[row][col], buf); // segfault fixed
+        dif_matrix[row][col] = true;
         free(buf);
         return 0;
     }
@@ -364,6 +379,22 @@ int bufferSet(int row, int col, char c, u_short r, u_short g, u_short b, u_short
     }
 }
 
+/**
+ * @brief fills buffer with string at row, col. string is cut at line end and put in next line.
+ *
+ * @param row y
+ * @param col x
+ * @param s string
+ * @param r red
+ * @param g green
+ * @param b blue
+ * @param bg_r background red
+ * @param bg_g background green
+ * @param bg_b background blue
+ * @return int 0, if successful |
+ * int 1, if failed |
+ * int 2, if string was truncated
+ */
 int bufferSet_s(int row, int col, char *s, u_short r, u_short g, u_short b, u_short bg_r, u_short bg_g, u_short bg_b)
 {
     if (row <= (lines - 1) && col <= (maxLine / (ANSI_FORMAT + 1)))
@@ -372,6 +403,7 @@ int bufferSet_s(int row, int col, char *s, u_short r, u_short g, u_short b, u_sh
         char *buf_0 = (char *)calloc(ANSI_FORMAT + 1, (sizeof(char)));
         snprintf(buf_0, ANSI_FORMAT + 1, "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm%c", r, g, b, bg_r, bg_g, bg_b, s[0]);
         strcpy(buffer_3d[row][col], buf_0);
+        dif_matrix[row][col] = true;
         char buf_1[2] = "\0";
         // check if string fits in current line
         if (col + strlen(s) <= (maxLine / (ANSI_FORMAT + 1)))
@@ -380,6 +412,7 @@ int bufferSet_s(int row, int col, char *s, u_short r, u_short g, u_short b, u_sh
             {
                 buf_1[0] = s[i];
                 strcpy(buffer_3d[row][col + i], buf_1);
+                dif_matrix[row][col + i] = true;
             }
         }
         else // string does not fit in current line
@@ -389,6 +422,7 @@ int bufferSet_s(int row, int col, char *s, u_short r, u_short g, u_short b, u_sh
             {
                 buf_1[0] = s[i];
                 strcpy(buffer_3d[row][col + i], buf_1);
+                dif_matrix[row][col + i] = true;
             }
             // fill consecutive lines
             int c = 0;
@@ -408,6 +442,7 @@ int bufferSet_s(int row, int col, char *s, u_short r, u_short g, u_short b, u_sh
                 {
                     buf_1[0] = s[i];
                     strcpy(buffer_3d[j][n], buf_1);
+                    dif_matrix[j][n] = true;
                     rem--;
                     i++;
                 }
@@ -442,7 +477,14 @@ void flushConcatBuffer()
 
 void flushBuffer_3d()
 {
-    memset(buffer_3d, 0, (lines * sizeof(char *)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * sizeof(char **)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * (ANSI_FORMAT + 1) * sizeof(char)));
+    // memset(buffer_3d, 0, (lines * sizeof(char *)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * sizeof(char **)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * (ANSI_FORMAT + 1) * sizeof(char)));
+    for (int i = 0; i < lines; i++)
+    {
+        for (int j = 0; j < (maxLine / (ANSI_FORMAT + 1)); j++)
+        {
+            memset(buffer_3d[i][j], 0, sizeof(buffer_3d[0][0][0]) * (ANSI_FORMAT + 1));
+        }
+    }
 }
 
 void flushDifMatrix()
@@ -508,7 +550,36 @@ char *formR(void)
     return "\x1b[0m";
 }
 
-//                       y    ,           x      ,             true        ,           false
+/**
+ * @brief Toggle between standard and difference render mode.
+ * Warning: toggling with buffer flush enabled may cause problems!
+ *
+ * @param enable
+ * @return int 0
+ */
+int setDifferenceMode(bool enable)
+{
+    if (enable)
+    {
+        enableDifferenceMode = true;
+    }
+    else
+    {
+        enableDifferenceMode = false;
+    }
+    return 0;
+}
+
+/**
+ * @brief initializes the renderer. Has to be called before every ANSI-Render function can be used.
+ *
+ * @param lineCount number of lines (rows) -> y
+ * @param maxLineLength length of a line (cols) -> x
+ * @param flushBufferOnRender enable buffer flush
+ * @param useDifferenceMode enable difference mode
+ * @return int 0, if successful |
+ * exit code 1 if memory allocation failed
+ */
 int initRenderer(int lineCount, int maxLineLength, bool flushBufferOnRender, bool useDifferenceMode)
 {
     remove_scrollbar_and_resize(maxLineLength, lineCount);
@@ -549,8 +620,10 @@ int initRenderer(int lineCount, int maxLineLength, bool flushBufferOnRender, boo
         dif_matrix[i] = calloc((maxLine / (ANSI_FORMAT + 1)), sizeof(bool));
     }
 
+    // dynamically allocate 3d render buffer
     // TODO this is utter garbage
-    buffer_3d = malloc((lines * sizeof(char *)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * sizeof(char **)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * (ANSI_FORMAT + 1) * sizeof(char))); // dynamically allocate 3d render buffer
+    /*
+    buffer_3d = malloc((lines * sizeof(char *)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * sizeof(char **)) + (lines * (maxLine / (ANSI_FORMAT + 1)) * (ANSI_FORMAT + 1) * sizeof(char)));
     for (int i = 0; i < lines; ++i)
     {
         buffer_3d[i] = (char **)(buffer_3d + lines) + i * (maxLine / (ANSI_FORMAT + 1));
@@ -560,6 +633,34 @@ int initRenderer(int lineCount, int maxLineLength, bool flushBufferOnRender, boo
         }
     }
     flushBuffer_3d();
+    */
+    buffer_3d = calloc(lines, sizeof(char **));
+    if (buffer_3d == NULL)
+    {
+        fprintf(stderr, "Cannot allocate buffer_3d: Out of memory");
+        exit(1);
+    }
+
+    for (int i = 0; i < lines; i++)
+    {
+        buffer_3d[i] = calloc((maxLine / (ANSI_FORMAT + 1)), sizeof(char *));
+
+        if (buffer_3d[i] == NULL)
+        {
+            fprintf(stderr, "Cannot allocate buffer_3d: Out of memory");
+            exit(1);
+        }
+
+        for (int j = 0; j < (maxLine / (ANSI_FORMAT + 1)); j++)
+        {
+            buffer_3d[i][j] = calloc((ANSI_FORMAT + 1), sizeof(char));
+            if (buffer_3d[i][j] == NULL)
+            {
+                fprintf(stderr, "Cannot allocate buffer_3d: Out of memory");
+                exit(1);
+            }
+        }
+    }
 
     size_t vbuf = -1;
     if ((lines * maxLine) < INT_MAX)
@@ -578,6 +679,11 @@ int initRenderer(int lineCount, int maxLineLength, bool flushBufferOnRender, boo
     return 0;
 }
 
+/**
+ * @brief exit ANSI-Render. Must be called upon completion of rendering.
+ * (if application does not terminate, there WILL be a memory leak)
+ * @return int 0, if successful
+ */
 int exitRenderer()
 {
     printf(formR());
@@ -592,14 +698,25 @@ int exitRenderer()
     free(buffer);
     free(dif_matrix);
     free(concat_buffer);
+
+    for (int i = 0; i < lines; i++)
+    {
+        for (int j = 0; j < (maxLine / (ANSI_FORMAT + 1)); j++)
+        {
+            free(buffer_3d[i][j]);
+        }
+        free(buffer_3d[i]);
+    }
     free(buffer_3d);
+
     setvbuf(stdout, NULL, _IONBF, 0); // reset buffer TODO find out default value
     return 0;
 }
 
-/** Renders one full frame
+/**
+ * @brief renders a full frame. If buffer flush is enabled, the buffer will be cleared.
  *
- * @return 0
+ * @return int 0, if successfull
  */
 int render()
 {
@@ -632,8 +749,28 @@ int render()
         }
         return 0;
     }
-    // true difference mode renderer
-    return 1;
+    else
+    {
+        // true difference mode renderer
+        for (int i = 0; i < lines; i++)
+        {
+            for (int j = 0; j < (maxLine / (ANSI_FORMAT + 1)); i++)
+            {
+                if (dif_matrix[i][j])
+                {
+                    moveToNoFormat(i + 1, j + 1);
+                    renderLine(buffer_3d[i][j]);
+                }
+            }
+        }
+
+        flushDifMatrix();
+        if (enableBufferFlush) //! it is NOT recommended to use difference mode with buffer flush enabled!!!
+        {
+            flushBuffer_3d();
+        }
+        return 0;
+    }
 }
 
 /*
