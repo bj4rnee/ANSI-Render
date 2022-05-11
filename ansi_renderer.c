@@ -16,7 +16,20 @@
 #include <string.h>
 #include <stdint.h>
 
+// ------------------------------------
 // ANSI ESCAPES & GENERAL FUNCTIONALITY
+// ------------------------------------
+
+//error utility macro
+#define ON_ERROR_EXIT(cond,message)\
+do{\
+    if((cond)){\
+        printf("ERROR in funtion: %s at line %d\n",__func__,__LINE__);\
+        perror((message));\
+        exit(1);\
+    }\
+} while(0)
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -187,8 +200,14 @@ int setTitle(char *s)
     return 1;
 }
 
-// removes terminal scrollbar and resizes the window. NO PROMISE CAN BE GIVEN ABOUT THE SUCCESS OF THE RESIZING OPERATION
-// returns 0 if successful
+/**
+ * @brief removes terminal scrollbar and resizes the window. NO PROMISE CAN BE GIVEN ABOUT THE SUCCESS OF THE RESIZING OPERATION.
+ * 
+ * @param x_ 
+ * @param y_ 
+ * @return int 0, if successful |
+ * int 1, if window couldn't be resized
+ */
 int remove_scrollbar_and_resize(int x_, int y_)
 {
 #if defined(__APPLE__) // can't remove scrollbar on MacOS
@@ -267,7 +286,9 @@ int ar_getRows()
     return rows;
 }
 
+// ------------------------------------
 // RENDERER
+// ------------------------------------
 
 int lines = 1;     // max number of lines (y)
 int maxLine = 100; // Max character length of line (x)
@@ -284,8 +305,6 @@ void ar_sleep(long milli)
     for (end = current + milli; current < end; current = clock())
         ;
 }
-
-// [WIP] add overflow checks to 'addToBuffer' and 'replaceInBuffer'
 
 int addToBuffer(int row, char *s)
 {
@@ -726,13 +745,18 @@ int render()
         moveToNoFormat(1, 1);
         for (int i = 0; i < lines; i++)
         {
-            strcat(concat_buffer, buffer[i]);
+            // strcat(concat_buffer, buffer[i]);
+            for (int j = 0; j < (maxLine / (ANSI_FORMAT + 1)); j++)
+            {
+                strcat(concat_buffer, buffer_3d[i][j]);
+            }
+
             if (i != lines - 1) // i isn't the last line
             {
                 strcat(concat_buffer, "\n");
             }
         }
-        renderLine(concat_buffer);
+        renderLine(concat_buffer); // Might look into 'WriteConsoleOutput'
         flushConcatBuffer();
 
         /* NON-concatenated buffer renderer
@@ -744,8 +768,8 @@ int render()
 
         if (enableBufferFlush)
         {
-            flushBuffer();
-            flushBuffer_3d();
+            // flushBuffer();
+            flushBuffer_3d(); // TODO fix buffer not flushing
         }
         return 0;
     }
